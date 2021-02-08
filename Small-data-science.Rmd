@@ -1,0 +1,320 @@
+---
+title: "Small-data-science-project"
+subtitle: "Gene and transcript annotations of the human genome"
+date: "`r Sys.Date()`"
+output: 
+    html_document:
+        theme: readable
+        toc: true
+        toc_depth: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+options(stringsAsFactors = FALSE)
+```
+
+# Background
+
+There have been extensive efforts to estimate [the number of genes in the human genome](https://www.nature.com/articles/d41586-018-05462-w), which turned out to be more difficult than originally anticipated. [One such effort](https://www.gencodegenes.org/pages/gencode.html) is led by [the GENCODE Consortium](https://doi.org/10.1101/gr.135350.111), which annotation is used by our lab for RNA-seq quantification.
+
+Here, we will download the latest annotation, munge the data, and conduct exploratory data analysis (e.g. data visualization and calculate descriptive statistics). Such a data science workflow can be conducted using different languages, such as `R`, `Python`, and `Julia`, but we focus on `R` here, which our lab uses predominantly. Now `R` code can be written using either `base R` or `tidyverse`. The goal of this project is to become familiar with `tidyverse`, which code is relatively more readable than `base R`. However, as long as you can get answers to the questions you are asking, which programming language you use or which style of code you write does not really matter.
+
+# Download GENCODE annotation
+
+We download [the latest GENCODE annotation](https://www.gencodegenes.org/human/) for the human genome (GRCh38), which is Release 36. We download the comprehensive gene annotation file in [GTF format](https://uswest.ensembl.org/info/website/upload/gff.html).
+
+``` {.bash}
+# Download using curl
+curl ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_36/gencode.v36.annotation.gtf.gz --output gencode.v36.annotation.gtf.gz
+
+# Take a quick look at the file using zless
+zless gencode.v36.annotation.gtf.gz
+```
+
+You can see that the `GTF` file has five header lines, does not have a separate line for column names, and is well-behaved until the 8th column, after which there seems to be a mix of various annotations separated by `;`. For better reproducibility, we can instead download the file directly in `R` using `system` command.
+
+```{r}
+system("curl ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_36/gencode.v36.annotation.gtf.gz --output gencode.v36.annotation.gtf.gz")
+```
+
+We read in the data using `readr` package that comes as part of `tidyverse`.
+
+```{r}
+library(tidyverse)
+annot <- read_delim("gencode.v36.annotation.gtf.gz", 
+                    delim = "\t", skip = 5, col_names = FALSE)
+```
+
+# Munge data
+
+Data munging is 80% of the job we usually do. This includes appropriately formatting the data for downstream analyses as well as tidying the data for `ggplot2` data visualization. We can start with checking the dimension of `annot` object and taking a look at its first 5 row.
+
+```{r}
+dim(annot)
+class(annot)
+annot %>% head(5)
+```
+
+Note that the class of `annot` object is `tibble`, which is advanced `data.frame` from `base R` that has some minor properties different from it, such as below.
+
+```{r}
+annot %>% as.data.frame() %>% .[, 1] %>% head()
+annot %>% .[, 1] %>% head()
+```
+
+Since the column names are missing, we manually assign column names based on [GTF format](https://www.gencodegenes.org/pages/data_format.html).
+
+```{r}
+colnames(annot) <- c("chromosome", "source", "feature", "start", "end", 
+                     "score", "strand", "phase", "info")
+
+str(annot)
+summary(annot)
+```
+
+For each transcript, we are often interested in `transcript support level`, where the score of 1 corresponds to best line of evidence and the score of 5 less convincing evidence. This information is contained in the last column of `annot`. We parse this information using `stringr` package that is part of `tidyverse`.
+
+```{r}
+annot_transcript <- annot %>% 
+  filter(feature == "transcript") # str_detect(info, "transcript_support_level") 
+
+annot_transcript$tsl <- str_extract(annot_transcript$info, 
+                                    "transcript_support_level (.*?);") %>% 
+  str_remove("transcript_support_level \"") %>% 
+  str_remove("\";")
+```
+
+We can then check for the number of transcripts with different levels of support as below. We can check for level of evidence by source of the data and gene biotype.
+
+```{r}
+annot_transcript %>% 
+  group_by(tsl) %>% 
+  count(tsl)
+
+annot_transcript %>% 
+  group_by(source) %>% 
+  count(tsl)
+
+annot_transcript$gene_type <- str_extract(annot_transcript$info, 
+                                    "gene_type (.*?);") %>% 
+  str_remove("gene_type \"") %>% 
+  str_remove("\";")
+
+annot_transcript %>% 
+  group_by(gene_type) %>% 
+  count(tsl)
+```
+
+# Exploratory data analysis
+
+Exploratory data analysis (EDA) is a term that broadly encompasses analyzing and visualizing the data to get a feel for the data and and as a result, come up with interesting scientific questions to ask with the data. For example, one could start with the number of features belonging to a particular feature type.
+
+```{r}
+annot %>% 
+  group_by(feature) %>% 
+  count(feature)  
+
+table(annot$feature)
+```
+
+The following questions can be answered as part of EDA.
+
+### Q1. How many genes are annotated by HAVANA or ENSEMBL?
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "gene") %>% 
+  group_by(source) %>% 
+  count(source)
+```
+
+### Q2. What is the average gene length? Which gene is the longest?
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  ggplot(aes(x = length)) + 
+  geom_histogram(aes(y = ..density..), 
+                 bins = 100, colour = "black", fill = "white") + 
+  scale_x_log10() + 
+  geom_density(alpha = 0.2, fill = "#FF6666") 
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  summarize(`avg length` = mean(length),
+            `median length` = median(length),
+            `25% quantile` = quantile(length, 0.25),
+            `75% quantile` = quantile(length, 0.75))
+
+annot$gene_id <- str_extract(annot$info, "gene_id (.*?);") %>% 
+  str_remove("gene_id \"") %>% 
+  str_remove("\";")
+
+annot$gene_name <- str_extract(annot$info, "gene_name (.*?);") %>% 
+  str_remove("gene_name \"") %>% 
+  str_remove("\";")
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  arrange(desc(length))  # RBFOX1 the longest gene in this annotation
+```
+
+In general, neuronal or brain-expressed genes are the longest genes.
+
+### Q3. Compare the distribution of gene length for autosomal and sex chromosomes (e.g. boxplot)
+
+```{r}
+# Solution
+annot <- filter(annot, chromosome != "chrM")
+annot <- mutate(annot, isSex = ifelse(chromosome %in% c("chrX", "chrY"), "Yes", "No"))
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  group_by(isSex) %>% 
+  summarize(`avg length` = mean(length)) 
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  ggplot(aes(x = isSex, y = length, fill = isSex)) + 
+  geom_boxplot() + 
+  scale_y_log10()
+```
+
+### Q4. Compare the distribution of gene length by gene biotype (e.g. protein-coding, long non-coding, miRNA, pseudogene)
+
+```{r}
+# Solution
+annot$gene_type <- str_extract(annot$info, "gene_type (.*?);") %>% 
+  str_remove("gene_type \"") %>% 
+  str_remove("\";")
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  mutate(length = end - start) %>% 
+  group_by(gene_type) %>% 
+  summarize(`avg length` = mean(length),
+            `median length` = median(length),
+            `25% quantile` = quantile(length, 0.25),
+            `75% quantile` = quantile(length, 0.75))
+```
+
+### Q5. Calculate and plot the number of genes per chromosome
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "gene") %>% 
+  group_by(chromosome) %>% 
+  count(chromosome) %>% 
+  arrange(desc(n))
+
+annot %>% 
+  filter(feature == "gene") %>% 
+  group_by(chromosome) %>% 
+  count(chromosome) %>% 
+  ggplot(aes(x = fct_reorder(chromosome, n, .desc = TRUE), y = n)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("")
+```
+
+Trisomy 13, 18, 21 are the only viable aneuploidies that is not embryonic lethal. As above, this is likely due to these chromosomes harboring the smallest number of genes, and hence having less number of genes affected by chromosomal anomalies.
+
+### Q6. Calculate and plot the number of different gene biotypes per chromosome
+
+```{r}
+# Solution 
+annot %>% 
+  filter(feature == "gene") %>% 
+  group_by(chromosome) %>% 
+  count(gene_type)
+```
+
+### Q7. What is the average number of transcripts per gene? Which gene has the most transcripts?
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "transcript") %>% 
+  group_by(gene_name) %>% 
+  summarize(count = n()) %>% 
+  summarize(mean = mean(count))
+
+annot %>% 
+  filter(feature == "transcript") %>% 
+  group_by(gene_name) %>% 
+  count("transcript") %>% 
+  arrange(desc(n))
+```
+
+On average, there are four transcripts per gene.
+
+### Q8. What is the average number of exons per gene? Which gene has the most exons?
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "exon") %>% 
+  group_by(gene_name) %>% 
+  summarize(count = n()) %>% 
+  summarize(mean = mean(count))
+
+annot %>% 
+  filter(feature == "exon") %>%
+  group_by(gene_name) %>% 
+  count("exon") %>% 
+  arrange(desc(n))
+```
+
+### Q9. Plot the histogram of the number of transcripts per gene
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "transcript") %>% 
+  group_by(gene_name) %>% 
+  summarize(count = n()) %>% 
+  ggplot(aes(x = count)) + 
+  geom_histogram(bins = 100, colour = "black", fill = "white") + 
+  scale_x_log10()
+```
+
+### Q10. Compare the number of transcripts per gene for different gene biotypes
+
+```{r}
+# Solution
+df <- annot %>% 
+  filter(feature == "transcript") %>% 
+  group_by(gene_name) %>% 
+  summarize(count = n())
+
+annot %>% 
+  filter(feature == "gene") %>%
+  inner_join(df, by = "gene_name") %>%
+  group_by(gene_type) %>% 
+  summarize(`mean number of transcripts` = mean(count))
+```
+
+### Q11. Compare the number of transcripts per gene across chromosomes
+
+```{r}
+# Solution
+annot %>% 
+  filter(feature == "gene") %>%
+  inner_join(df, by = "gene_name") %>%
+  group_by(chromosome) %>% 
+  summarize(`mean number of transcripts` = mean(count))
+```
+
+# Conclusion
+
+In this exercise, we have become familiar with handling and analyzing the `GTF` file. Similar analysis framework can be applied to other data modalities. Hopefully, by the end of this exercise, we have also become familiar with `tidyverse` and writing code in `R Markdown`. The syntax of `tidyverse` allows for coding and analysis of the data with minimal cognitive load without compromising performance. Finally, per usual in bioinformatics, there is no one way of collecting and analyzing gene annotation. Other commonly used annotations include those from RefSeq and CCDS. There is also an `R` package `biomaRt` that provides gene annotation information and is commonly used.
