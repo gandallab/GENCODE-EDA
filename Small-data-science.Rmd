@@ -73,6 +73,11 @@ colnames(annot) <- c("chromosome", "source", "feature", "start", "end",
 
 str(annot)
 summary(annot)
+
+#annot %>% 
+#  mutate(length = end - start + 1) %>% 
+#  filter(length == 1) %>% 
+#  View()  # Some features have length of 1 bp 
 ```
 
 For each transcript, we are often interested in `transcript support level`, where the score of 1 corresponds to best line of evidence and the score of 5 less convincing evidence. This information is contained in the last column of `annot`. We parse this information using `stringr` package that is part of `tidyverse`.
@@ -91,7 +96,6 @@ We can then check for the number of transcripts with different levels of support
 
 ```{r}
 annot_transcript %>% 
-  group_by(tsl) %>% 
   count(tsl)
 
 annot_transcript %>% 
@@ -106,6 +110,40 @@ annot_transcript$gene_type <- str_extract(annot_transcript$info,
 annot_transcript %>% 
   group_by(gene_type) %>% 
   count(tsl)
+
+annot_transcript$gene_id <- str_extract(annot_transcript$info, 
+                                        "gene_id (.*?);") %>% 
+  str_remove("gene_id \"") %>% 
+  str_remove("\";")
+
+annot_transcript$gene_name <- str_extract(annot_transcript$info, 
+                                        "gene_name (.*?);") %>% 
+  str_remove("gene_name \"") %>% 
+  str_remove("\";")
+
+annot_transcript$transcript_id <- str_extract(annot_transcript$info, 
+                                        "transcript_id (.*?);") %>% 
+  str_remove("transcript_id \"") %>% 
+  str_remove("\";")
+
+annot_transcript$hgnc_id <- str_extract(annot_transcript$info, 
+                                        "hgnc_id (.*?);") %>% 
+  str_remove("hgnc_id \"") %>% 
+  str_remove("\";")
+
+annot_transcript$level <- str_extract(annot_transcript$info, 
+                                        "level (.*?);") %>% 
+  str_remove(";")
+
+#annot_transcript %>% 
+#  mutate(isHGNC = !is.na(hgnc_id)) %>% 
+#  group_by(isHGNC) %>% 
+#  count(level) 
+
+annot_transcript$ccdsid <- str_extract(annot_transcript$info, 
+                                        "ccdsid (.*?);") %>% 
+  str_remove("ccdsid \"") %>% 
+  str_remove("\";")
 ```
 
 # Exploratory data analysis
