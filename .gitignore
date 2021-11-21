@@ -1,3 +1,5 @@
 gencode.v36.annotation.gtf.gz
-Small-data-science.html
-Small-data-science-soln.html
+src/R/Small-data-science.html
+src/R/Small-data-science-soln.html
+.DS_Store
+
